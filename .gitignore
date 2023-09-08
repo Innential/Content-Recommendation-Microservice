@@ -1,0 +1,9 @@
+app/.env
+app/response.json
+app/errors.json
+app/surveys.json
+app/missing_skills.json
+/venv/
+/.ssl
+/certbot
+!/FastAPI/test_sentence.py
