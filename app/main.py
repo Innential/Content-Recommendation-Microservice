@@ -26,7 +26,7 @@ load_dotenv()
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
 # File to store errors
-ERRORS_FILE = "errors.json"
+ERRORS_FILE = "errors.jso"
 
 # File to store surbeys
 MISSING_SKILLS_FILE = "surveys.json"
