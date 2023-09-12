@@ -51,9 +51,9 @@ class DefaultParams:
         self.presence_penalty = 0
         self.bert_model = 'all-MiniLM-L6-v2'
         self.z_score_threshold = 3
-        self.cutoff_skills = 0.6
+        self.cutoff_skills = 0.5
         self.number_of_output_skills = 3
-        self.missing_skills_cutoff = 0.6
+        self.missing_skills_cutoff = 0.4
         self.soft_skills_number = 8
         self.tech_skills_number = 5
 
@@ -271,9 +271,9 @@ def assign_skills(sentences, inn_skills):
             cos_scores = util.cos_sim(sentence_embedding, embeddings_inn)[0]
             top_results = torch.topk(cos_scores, k=top_k)
 
-            #print("")
-            #print("")
-            #print("Query:", k)
+            print("")
+            print("")
+            print("Query:", k)
 
             first_skill = 0
 
@@ -291,7 +291,7 @@ def assign_skills(sentences, inn_skills):
                         gpt_skills.append([round(score.item(), 2), inn_skills[idx]])
                         first_skill = 1
 
-            #print("gpt_skills:", gpt_skills)
+            print("gpt_skills:", gpt_skills)
 
 
 
@@ -333,14 +333,14 @@ def assign_skills_position(sentences, inn_skills):
             cos_scores = util.cos_sim(sentence_embedding, embeddings_inn)[0]
             top_results = torch.topk(cos_scores, k=top_k)
 
-            #print("")
-            #print("")
-            #print("Query:", k)
+            print("")
+            print("")
+            print("Query:", k)
 
             first_skill = 0
 
             for score, idx in zip(top_results[0], top_results[1]):
-                #print(inn_skills[idx], "(Score: {:.4f})".format(score))
+                print(inn_skills[idx], "(Score: {:.4f})".format(score))
 
 
                 # Save the unique skills in user vector
@@ -371,8 +371,8 @@ def assign_skills_position(sentences, inn_skills):
         return
 
 
-    #print("")
-    #print("Missing skills:", missing_skills)
+    print("")
+    print("Missing skills:", missing_skills)
 
     return tech_skills, soft_skills, list(missing_skills)
 
@@ -391,7 +391,7 @@ def assign_skills_simple(sentences, inn_skills):
         top_results = torch.topk(cos_scores, k=top_k)
 
         for score, idx in zip(top_results[0], top_results[1]):
-            #print(inn_skills[idx], "(Score: {:.4f})".format(score))
+            print(inn_skills[idx], "(Score: {:.4f})".format(score))
             user_vector.append([round(score.item(), 2), inn_skills[idx]])
 
 
@@ -459,14 +459,14 @@ def return_skills_improved(user_input, json_validation, inn_list):
             # print"Skills:",skills)
 
             #sorted_tags = sorted(skills, key=lambda x: x[0], reverse=True)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
+            print("Sklls:", skills)
+            print("User Vector:", user_vector)
 
         else:
             inn_list = innential_skills()
             skills, user_vector = assign_skills_simple(user_input, inn_list)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
+            print("Sklls:", skills)
+            print("User Vector:", user_vector)
 
     except Exception as e:
         save_error(str(e), traceback.format_exc(), "return_skills_improved")
@@ -573,6 +573,11 @@ def validate_json(text):
         if last_brace_index != -1:
             text = text[:last_brace_index + 1]
 
+        # Remoce the last comma
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+
+
         return text
 
     except Exception as e:
@@ -582,10 +587,10 @@ def validate_json(text):
 def is_valid_json(json_string):
     try:
         json.loads(json_string)
-        #print("Json is valid")
+        print("Json is valid")
         return True
     except ValueError:
-        #print("Json is invalid")
+        print("Json is invalid")
         return False
 
 def chat(message):
@@ -650,7 +655,7 @@ def gpt_feedback(user_input: str) -> str:
     response, completion_tokens, prompt_tokens = chat(text)
     end = time.time()
 
-    #print("GPT first: {} seconds".format(end - start))
+    print("GPT first: {} seconds".format(end - start))
 
     # Try another prompt if the first one doesn't work
     if response == "":
@@ -668,14 +673,14 @@ def gpt_feedback(user_input: str) -> str:
     else:
         response_json = response
 
-    #print(type(response_json))
-    #print("GPT formatted json:", response_json)
+    print(type(response_json))
+    print("GPT formatted json:", response_json)
 
     return response_json, completion_tokens, prompt_tokens, json_validation
 
 def gpt_skills(user_input: str, skills: list, innential_skills: list) -> str:
 
-    #print("skills lenght:", len(skills))
+    print("skills lenght:", len(skills))
     # Check if there are more skills than one
 
     # Join skills into a string
@@ -693,8 +698,8 @@ def gpt_skills(user_input: str, skills: list, innential_skills: list) -> str:
     # Call to GPT
     response, completion_tokens, prompt_tokens = chat(text_extended)
     end = time.time()
-    #print(response)
-    #print("""GPT second: {} seconds""".format(end - start))
+    print(response)
+    print("""GPT second: {} seconds""".format(end - start))
 
     # Remove prefix from response
     response_json = response[response.find('{'): response.find('}') + 1]
@@ -719,7 +724,7 @@ def gpt_company_position(user_input: str) -> str:
     else:
         response_json = response
 
-    #print("GPT job position:", response_json)
+    print("GPT job position:", response_json)
 
     return response_json
 
@@ -784,11 +789,19 @@ def process_message(message):
         # GPT call again
         processed_text, completion_tokens_v2, prompt_tokens = gpt_skills(message, [skill for score, skill in skill_list], innential_list)
 
+        print("Processed text:", processed_text)
+
         # Remove html tags
         processed_text = remove_html_tags(processed_text)
 
+        print("Remove html tags:", processed_text)
+
+        processed_text = validate_json(processed_text)
+
+        print(processed_text)
+
         # Load response to json
-        json_text = json.loads(validate_json(processed_text))
+        json_text = json.loads(str(processed_text))
 
         # Check if the skills from responses matches the skills from innential, if not then remove them
         filtered_skills = {skill: description for skill, description in json_text.items() if
@@ -927,7 +940,7 @@ def process_message_api(message: Message):
 
     tech_skills, soft_skills, missing_skills = return_skills_position(response, is_valid_json(response), innential_list)
 
-    #print("step 1")
+    print("step 1")
 
     # Save missing skills if there are any
     if missing_skills:
@@ -941,7 +954,7 @@ def process_message_api(message: Message):
         "missing_skills:": missing_skills,
     }
 
-    #print("step 2")
+    print("step 2")
 
     if os.path.exists(MISSING_SKILLS_FILE):
         with open(MISSING_SKILLS_FILE, "r") as file:
