@@ -111,18 +111,8 @@ class FeedbackInfo(BaseModel):
     total_price: float
     total_tokens: float
 
-class JobPosition(BaseModel):
-    missing_skills: list
-
-class SurveyInfo(BaseModel):
-    usability: int # Scale 1-5
-    skills_corectness: int  # Scale 1-5
-    runtime: int # Scale 1-5
-    comments: str # Feedback from user
-
 class Message(BaseModel):
     message: str
-
 
 # Generate user ID
 def generate_user_id():
@@ -172,28 +162,6 @@ def save_error(error_message=str, function=str, traceback_info=str):
     else:
         with open(ERRORS_FILE, "w") as file:
             json.dump([error_data], file, indent=4)
-
-def save_survey():
-    test_data = {
-                  "user_id": FeedbackInfo.user_id,
-                  "user_input": remove_html_tags(FeedbackInfo.message),
-                  "feedback": FeedbackInfo.gpt_second_response,
-                  "total_time": round(FeedbackInfo.total_time,2),
-                  "usability": SurveyInfo.usability,
-                  "skills_corectness": SurveyInfo.skills_corectness,
-                  "runtime": SurveyInfo.runtime,
-                  "comments": SurveyInfo.comments
-                  }
-
-    if os.path.exists(MISSING_SKILLS_FILE):
-        with open(MISSING_SKILLS_FILE, "r") as file:
-            poll = json.load(file)
-            poll.append(test_data)
-        with open(MISSING_SKILLS_FILE, "w") as file:
-            json.dump(poll, file, indent=4)
-    else:
-        with open(MISSING_SKILLS_FILE, "w") as file:
-            json.dump([test_data], file, indent=4)
 
 # Save responses from the program to json dict
 def save_response():
@@ -271,14 +239,14 @@ def assign_skills(sentences, inn_skills):
             cos_scores = util.cos_sim(sentence_embedding, embeddings_inn)[0]
             top_results = torch.topk(cos_scores, k=top_k)
 
-            print("")
-            print("")
-            print("Query:", k)
+            #print("")
+            #print("")
+            #print("Query:", k)
 
             first_skill = 0
 
             for score, idx in zip(top_results[0], top_results[1]):
-                print(inn_skills[idx], "(Score: {:.4f})".format(score))
+                #print(inn_skills[idx], "(Score: {:.4f})".format(score))
 
                 # Save the unique skills in user vector
                 if idx.item() not in seen_indices_user_vector:
@@ -291,7 +259,7 @@ def assign_skills(sentences, inn_skills):
                         gpt_skills.append([round(score.item(), 2), inn_skills[idx]])
                         first_skill = 1
 
-            print("gpt_skills:", gpt_skills)
+            #print("gpt_skills:", gpt_skills)
 
 
 
@@ -307,74 +275,6 @@ def assign_skills(sentences, inn_skills):
 
     return filtered_skills, user_vector
 
-def assign_skills_position(sentences, inn_skills):
-    try:
-        # Encode the text
-        embeddings_inn = nlp_model.encode(inn_skills)
-
-        # Get the top 3 most similar sentences
-        gpt_skills = []
-        soft_skills = []
-        tech_skills = []
-        user_vector = []
-        top_k = min(5, len(sentences))
-        seen_indices_user_vector = set()  # To keep track of seen indices
-        seen_indices_gpt_skills = set()
-        missing_skills = set()
-
-        counter = 1
-
-        for k in sentences:
-
-            # Encode the text
-            sentence_embedding = nlp_model.encode(k, convert_to_tensor=True)
-
-            # Compute cosine similarity between all pairs
-            cos_scores = util.cos_sim(sentence_embedding, embeddings_inn)[0]
-            top_results = torch.topk(cos_scores, k=top_k)
-
-            print("")
-            print("")
-            print("Query:", k)
-
-            first_skill = 0
-
-            for score, idx in zip(top_results[0], top_results[1]):
-                print(inn_skills[idx], "(Score: {:.4f})".format(score))
-
-
-                # Save the unique skills in user vector
-                if idx.item() not in seen_indices_user_vector:
-                    seen_indices_user_vector.add(idx.item())
-                    user_vector.append([round(score.item(), 2), inn_skills[idx]])
-
-                if first_skill == 0:
-                    if idx.item() not in seen_indices_gpt_skills and score >= default_params.cutoff_skills:
-                        seen_indices_gpt_skills.add(idx.item())
-                        if counter <=  default_params.tech_skills_number:
-                            tech_skills.append([round(score.item(), 2), inn_skills[idx]])
-                        else:
-                            soft_skills.append([round(score.item(), 2), inn_skills[idx]])
-
-                        first_skill = 1
-
-                    if score < default_params.cutoff_skills:
-                        missing_skills.add(k)
-
-            counter += 1
-
-            #print("gpt_skills:", gpt_skills)
-
-
-    except Exception as e:
-        save_error(str(e), traceback.format_exc(), "assign_skills")
-        return
-
-
-    print("")
-    print("Missing skills:", missing_skills)
-
-    return tech_skills, soft_skills, list(missing_skills)
 
 def assign_skills_simple(sentences, inn_skills):
     try:
@@ -391,7 +291,7 @@ def assign_skills_simple(sentences, inn_skills):
         top_results = torch.topk(cos_scores, k=top_k)
 
         for score, idx in zip(top_results[0], top_results[1]):
-            print(inn_skills[idx], "(Score: {:.4f})".format(score))
+            #print(inn_skills[idx], "(Score: {:.4f})".format(score))
             user_vector.append([round(score.item(), 2), inn_skills[idx]])
 
 
@@ -409,39 +309,6 @@ def assign_skills_simple(sentences, inn_skills):
 
     return filtered_skills, user_vector
 
-def return_skills_position(user_input, json_validation, inn_list):
-    try:
-
-        if json_validation is True:
-
-            response_dict = json.loads(user_input[user_input.find('{'):])
-            # printresponse_dict)
-
-            sentences = []
-            for skill, des in response_dict.items():
-                sentences.append(des)
-
-            tech_skills, soft_skills, missing_skills = assign_skills_position(sentences, inn_list)
-            # print"Skills:",skills)
-
-            #sorted_tags = sorted(skills, key=lambda x: x[0], reverse=True)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
-
-        else:
-            inn_list = innential_skills()
-            tech_skills, user_vector = assign_skills_simple(user_input, inn_list)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
-
-    except Exception as e:
-        save_error(str(e), traceback.format_exc(), "return_skills_improved")
-        return
-
-    print("Tech:", tech_skills)
-    print("Soft:", soft_skills)
-
-    return tech_skills, soft_skills, missing_skills
 
 def return_skills_improved(user_input, json_validation, inn_list):
     try:
@@ -459,14 +326,14 @@ def return_skills_improved(user_input, json_validation, inn_list):
             # print"Skills:",skills)
 
             #sorted_tags = sorted(skills, key=lambda x: x[0], reverse=True)
-            print("Sklls:", skills)
-            print("User Vector:", user_vector)
+            #print("Sklls:", skills)
+            #print("User Vector:", user_vector)
 
         else:
             inn_list = innential_skills()
             skills, user_vector = assign_skills_simple(user_input, inn_list)
-            print("Sklls:", skills)
-            print("User Vector:", user_vector)
+            #print("Sklls:", skills)
+            #print("User Vector:", user_vector)
 
     except Exception as e:
         save_error(str(e), traceback.format_exc(), "return_skills_improved")
@@ -587,10 +454,10 @@ def validate_json(text):
 def is_valid_json(json_string):
     try:
         json.loads(json_string)
-        print("Json is valid")
+        #print("Json is valid")
         return True
     except ValueError:
-        print("Json is invalid")
+        #print("Json is invalid")
         return False
 
 def chat(message):
@@ -618,32 +485,6 @@ def chat(message):
     return response['choices'][0]['message']['content'].strip(), response['usage']['completion_tokens'], \
     response['usage']['prompt_tokens']
 
-def chat_company_position(message):
-    # Use OpenAI Chat API to generate a response
-    # Access attributes from default_params instance
-    gpt_model = "gpt-4"
-    temperature = 0.5
-    max_tokens = 250
-    top_p = 0.6
-    frequency_penalty = 0.6
-    presence_penalty = 0
-
-
-    response = openai.ChatCompletion.create(
-        model=gpt_model,  # Use the model name from default_params
-        temperature=temperature,
-        max_tokens=max_tokens,
-        top_p=top_p,
-        frequency_penalty=frequency_penalty,
-        presence_penalty=presence_penalty,
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": message},
-        ]
-    )
-    return response['choices'][0]['message']['content'].strip(), response['usage']['completion_tokens'], \
-    response['usage']['prompt_tokens']
-
 def gpt_feedback(user_input: str) -> str:
     text = "Feedback: " + user_input + """
             Assign up to """ + str(default_params.number_of_output_skills) + """ skills to the feedback.
@@ -655,7 +496,7 @@ def gpt_feedback(user_input: str) -> str:
     response, completion_tokens, prompt_tokens = chat(text)
     end = time.time()
 
-    print("GPT first: {} seconds".format(end - start))
+    #print("GPT first: {} seconds".format(end - start))
 
     # Try another prompt if the first one doesn't work
     if response == "":
@@ -673,8 +514,8 @@ def gpt_feedback(user_input: str) -> str:
     else:
         response_json = response
 
-    print(type(response_json))
-    print("GPT formatted json:", response_json)
+    #print(type(response_json))
+    #print("GPT formatted json:", response_json)
 
     return response_json, completion_tokens, prompt_tokens, json_validation
 
@@ -707,27 +548,6 @@ def gpt_skills(user_input: str, skills: list, innential_skills: list) -> str:
     # print"GPT formatted json:", response_json)
     return response_json, completion_tokens, prompt_tokens
 
-def gpt_company_position(user_input: str) -> str:
-    text = "Job position: " + user_input + """
-            Assign """ + str(default_params.tech_skills_number) + """ technical skills or businees depending on the position and then """ + str(default_params.soft_skills_number) + """ soft skills to the job position. Use names of technologies intead of general skills.
-            Return response with only one list of skills names (one sentance) in JSON {"Skill number":"skill name"} format.
-            """
-
-    response, completion_tokens, prompt_tokens = chat_company_position(text)
-
-    json_validation = is_valid_json(response)
-
-    if json_validation is True:
-        # Remove prefix from response
-        response_json = response[response.find('{'): response.find('}') + 1]
-
-    else:
-        response_json = response
-
-    print("GPT job position:", response_json)
-
-    return response_json
-
 def calc_price(model: str, completion_tokens: int, prompt_tokens: int):
     try:
         price = None
@@ -749,7 +569,6 @@ def calc_price(model: str, completion_tokens: int, prompt_tokens: int):
     except Exception as e:
         save_error(str(e), "calc_price", traceback.format_exc())
         return 0
-
 
 def process_message(message):
     try:
@@ -789,16 +608,99 @@ def process_message(message):
         # GPT call again
         processed_text, completion_tokens_v2, prompt_tokens = gpt_skills(message, [skill for score, skill in skill_list], innential_list)
 
-        print("Processed text:", processed_text)
+        #print("Processed text:", processed_text)
 
         # Remove html tags
         processed_text = remove_html_tags(processed_text)
 
-        print("Remove html tags:", processed_text)
+        #print("Remove html tags:", processed_text)
 
         processed_text = validate_json(processed_text)
 
-        print(processed_text)
+        #print(processed_text)
+
+        # Load response to json
+        json_text = json.loads(str(processed_text))
+
+        # Check if the skills from responses matches the skills from innential, if not then remove them
+        filtered_skills = {skill: description for skill, description in json_text.items() if
+                           skill in innential_list}
+
+        # Save response
+        FeedbackInfo.gpt_second_response = filtered_skills
+
+        price_2 = calc_price('gpt-3', completion_tokens_v2, prompt_tokens)
+
+        # Calculate total price
+        total_price = round(price_v1 + price_2, 5)
+        FeedbackInfo.total_price = total_price
+        FeedbackInfo.total_tokens = completion_tokens_v1 + completion_tokens_v2
+
+        response = {
+            "Feedback": filtered_skills,
+        }
+
+        end_total = time.time()
+        FeedbackInfo.total_time = end_total - start_total
+
+        # print"Total time: ", end_total - start_total)
+
+    except Exception as e:
+        save_error(str(e), "process_message", traceback.format_exc())
+        return
+
+    save_response()
+
+    return response, user_vector
+
+def recommend_feedback(message):
+    try:
+        # Measure total time
+        start_total = time.time()
+
+        # Save input to class
+        FeedbackInfo.message = message
+
+        # Get innential skills
+        innential_list = innential_skills()
+
+        # Use OpenAI Chat API to generate a response
+        first_response, completion_tokens_v1, prompt_tokens, json_validation = gpt_feedback(message)
+
+        if json_validation is True:
+            FeedbackInfo.gpt_first_response = json.loads(validate_json(first_response))
+        else:
+            FeedbackInfo.gpt_first_response = first_response
+
+        # Calculate price of the request
+        price_v1 = calc_price('gpt-3', completion_tokens_v1, prompt_tokens)
+
+        # Measure time for assigning skills
+        start_skills = time.time()
+
+        # Assign skills
+        skill_list, user_vector = return_skills_improved(first_response, json_validation, innential_list)
+
+
+        FeedbackInfo.skills = skill_list
+        FeedbackInfo.user_vector = user_vector
+
+        end_skills = time.time()
+        FeedbackInfo.assign_skills_time = end_skills - start_skills
+
+        # GPT call again
+        processed_text, completion_tokens_v2, prompt_tokens = gpt_skills(message, [skill for score, skill in skill_list], innential_list)
+
+        #print("Processed text:", processed_text)
+
+        # Remove html tags
+        processed_text = remove_html_tags(processed_text)
+
+        #print("Remove html tags:", processed_text)
+
+        processed_text = validate_json(processed_text)
+
+        #print(processed_text)
 
         # Load response to json
         json_text = json.loads(str(processed_text))
@@ -845,6 +747,7 @@ def process_message_api(message: Message):
 
 @app.post("/feedback_recommendation")
 def feedback_recommendation_api(message: Message):
+    start = time.time()
     # Generate user ID
     FeedbackInfo.user_id = generate_user_id()
 
@@ -852,28 +755,17 @@ def feedback_recommendation_api(message: Message):
 
     recommendation = recommendation_engine(user_vector, str(response['Feedback']), message.message)
 
+    end = time.time()
+
+    print("")
+    print("Recommendation time:", end - start)
+    print("")
+
     return response, recommendation
 
 # Receive survey json
-@app.put("/save_survey")
-def save_survey_api(test: SurveyInfo):
-    SurveyInfo.usability = test.usability
-    SurveyInfo.skills_corectness = test.skills_corectness
-    SurveyInfo.runtime = test.runtime
-    SurveyInfo.comments = test.comments
-    save_survey()
-    return {"Message: Survey saved successfully."}
 
 # Endpoint for survey json
-@app.get("/open_survey")
-def open_survey_api():
-    if os.path.exists(MISSING_SKILLS_FILE):
-        with open(MISSING_SKILLS_FILE, "r") as file:
-            errors = json.load(file)
-        return errors
-    else:
-        return []
-    return
 
 @app.get('/healthcheck')
 def healthcheck():
@@ -925,49 +817,3 @@ def update_params(params: ApiParams):
 def reset_params():
     default_params.__init__()
     return {"message": "Parameters reset to default values."}
-
-@app.post("/job_position")
-def process_message_api(message: Message):
-    # 1. Skrypt do dodawania skilli których nie ma w innential
-    # 2. Job positions from our database
-    # 3. Divide between soft and tech skills
-
-    response = gpt_company_position(message.message)
-
-    innential_list = innential_skills()
-
-    response = response.replace("'", "\"")
-
-    tech_skills, soft_skills, missing_skills = return_skills_position(response, is_valid_json(response), innential_list)
-
-    print("step 1")
-
-    # Save missing skills if there are any
-    if missing_skills:
-        JobPosition.missing_skills = missing_skills
-
-    tech_skills = (skill for weight,skill in tech_skills)
-    soft_skills = (skill for weight,skill in soft_skills)
-
-    position_data = {
-        "user_input": message.message,
-        "missing_skills:": missing_skills,
-    }
-
-    print("step 2")
-
-    if os.path.exists(MISSING_SKILLS_FILE):
-        with open(MISSING_SKILLS_FILE, "r") as file:
-            poll = json.load(file)
-            poll.append(position_data)
-        with open(MISSING_SKILLS_FILE, "w") as file:
-            json.dump(poll, file, indent=4)
-    else:
-        with open(MISSING_SKILLS_FILE, "w") as file:
-            json.dump([position_data], file, indent=4)
-
-    print("step 3")
-
-    return tech_skills, soft_skills
-
-
