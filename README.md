@@ -2,6 +2,8 @@
 REM is the NLP-based microsrvice that will recommend a content based on the description from the users input. The application uses FeedbackGPT, SBERT and Cosine similiarites to fit the best possible courses for the user.
 
 ### Design overview
+<img src="https://github.com/Innential/Content-Recommendation-Microservice/blob/main/app/Data/design.jpg" width="800"/>
+
 FeedbackGPT powered by ChatGPT, generates the feedback for the users input. The feedback consist of a few sentences describing the solution and skills for the users question. Example:
 ```
 User feedback:  {
