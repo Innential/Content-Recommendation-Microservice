@@ -7,9 +7,21 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipe
 import requests
 from sentence_transformers import SentenceTransformer, util
 import re
+from pydantic import BaseModel
 
 # Sentence model tranformer
 sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# TODO
+# Load innential base once in a while
+# Stages in separate function in separate file pipieline.py
+
+class Candidate(BaseModel):
+    candidates: list
+    selection: list
+    user_vector: list
+    user_input: str
+    user_feedback: str
 
 def innential_API():
     # Connect to API and gather all skills to list
@@ -31,7 +43,7 @@ def read_json(path):
     with open(path) as f:
         return json.load(f)
 
-def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff):
+def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, weight=1.5):
     # FIltering based on SBERT
 
     #print("Course: ", course)
@@ -61,7 +73,7 @@ def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff):
     for i in range(len(list_of_candidates)):
         for j in range(len(assigned_skills)):
             if list_of_candidates[i][0] == assigned_skills[j][0]:
-                list_of_candidates[i][1] += assigned_skills[j][1]*1.5
+                list_of_candidates[i][1] += assigned_skills[j][1]*weight
                 break
 
     # Sort list_of_candidates by the updated score
@@ -143,8 +155,12 @@ user_preferences =  [
     ]
 user_feedback = "My team members told me that I need to become a better product manager and work on roadmapping"
 
-def recommendation_engine(user_preferences, user_feedback, user_input):
+def generate_candidates(user_preferences, user_feedback, user_input, n_candidates=100):
     innential_skills = innential_API()
+
+    print(user_preferences)
+
+    Candidate.user_vector = user_preferences
 
     skills_found = find_skills(user_input, innential_skills)
 
@@ -163,24 +179,23 @@ def recommendation_engine(user_preferences, user_feedback, user_input):
 
     # sort the user preferences based on the cosine similarity
     user_preferences = sorted(user_preferences, key=lambda x: x[0], reverse=True)
-    user_preferences = user_preferences[:5]
+    user_preferences = user_preferences[:8]
 
     print("User vector: ", user_preferences)
     print("User feedback: ", user_feedback)
 
-
-    #print("Innential skills:", innential_skills)
+    # print("Innential skills:", innential_skills)
 
     start = time.time()
 
-    #user_vector = np.array([skill[0] if skill[1] in user_preferences else 0 for skill in innential_skills])
+    # user_vector = np.array([skill[0] if skill[1] in user_preferences else 0 for skill in innential_skills])
 
     # Create empty vector
     user_vector = np.zeros(len(innential_skills))
 
     # Max value
     max_weight = max(pref[0] for pref in user_preferences)
-    #print("Max weight: ", max_weight)
+    # print("Max weight: ", max_weight)
 
     # Cutoff
     cutoff = 0
@@ -190,7 +205,7 @@ def recommendation_engine(user_preferences, user_feedback, user_input):
         skill = pref[1]
         if skill in innential_skills:
             # Normalize to 1
-            weight = round(pref[0]/ max_weight,2)
+            weight = round(pref[0] / max_weight, 2)
             if weight >= cutoff:
                 index = innential_skills.index(skill)
                 user_vector[index] = weight
@@ -212,7 +227,6 @@ def recommendation_engine(user_preferences, user_feedback, user_input):
             seen_titles.add(title)
             unique_data.append(course)
 
-
     iteration_limit = 8800
     cosine_similarities = []
 
@@ -222,12 +236,12 @@ def recommendation_engine(user_preferences, user_feedback, user_input):
         if i >= iteration_limit:
             break
 
-        #print(course)
+        # print(course)
 
         # Create a dictionary to store skill weights for the course
         skill_weights = course["analysis_results"]
 
-        #print("skills: ", skill_weights)
+        # print("skills: ", skill_weights)
 
         # Vector for the course based on all_skills with corresponding weights
         course_vector = np.array([skill_weights[skill] if skill in skill_weights else 0 for skill in innential_skills])
@@ -242,27 +256,39 @@ def recommendation_engine(user_preferences, user_feedback, user_input):
     cosine_similarities.sort(key=lambda x: x[1], reverse=True)
 
     # Get the top 20 candidates with their respective titles
-    top_n_candidates = cosine_similarities[:100]
+    top_n_candidates = cosine_similarities[:n_candidates]
 
+    # Save the top N candidates with their respective titles
+    Candidate.candidates = top_n_candidates
+
+    return top_n_candidates
+
+def selection(top_n_candidates, user_input, weight):
     # Print the top 20 candidates with their respective titles
     for i, (course, cosine_sim) in enumerate(top_n_candidates):
-        print(f"{i+1}. {course['course_title']} - Cos: {round(cosine_sim,2)} - {course['analysis_results']}")
+        print(f"{i + 1}. {course['course_title']} - Cos: {round(cosine_sim, 2)} - {course['analysis_results']}")
 
     print("")
     print("Sbert filtering:")
 
     # Filtering based on SBERT
     start_sbert = time.time()
-    filtering = filter_courses_sbert(user_feedback, top_n_candidates, sentence_model, 10, 0.1)
+    filtering = filter_courses_sbert(user_input, top_n_candidates, sentence_model, 10, 0.1, weight)
+    Candidate.selection = filtering  # Save the filtered courses
     end_sbert = time.time()
 
     print(f"Total time taken: {end_sbert - start_sbert} seconds")
 
     for i, course in enumerate(filtering):
-        print(f"{i+1}. {course[0]['course_title']} - {course[1]} - {course[0]['analysis_results']} - {course[0]['source_url']}")
-
-    end = time.time()
-    print(f"Total time taken: {end - start} seconds")
-
+        print(
+            f"{i + 1}. {course[0]['course_title']} - {course[1]} - {course[0]['analysis_results']} - {course[0]['source_url']}")
 
     return filtering
+
+def recommendation_engine(user_preferences, user_feedback, user_input):
+    Candidate.user_input = user_input
+    Candidate.user_feedback = user_feedback
+    top_n_candidates = generate_candidates(user_preferences, user_feedback, user_input, n_candidates=100)
+    filtering = selection(top_n_candidates, user_input, weight=1.5)
+
+    return filtering, top_n_candidates

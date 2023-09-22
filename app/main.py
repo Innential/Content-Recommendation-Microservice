@@ -1,4 +1,4 @@
-from recommendation_engine import recommendation_engine
+from recommendation_engine import recommendation_engine, Candidate, selection, generate_candidates
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -14,7 +14,6 @@ import traceback
 import torch
 import re
 
-
 # http://127.0.0.1:8000/docs#/ interactive API documentation
 # http://127.0.0.1:8000/redoc  ReDoc interactive API documentation
 # http://127.0.0.1:8000/openapi.json OpenAPI json scheme
@@ -28,14 +27,8 @@ openai.api_key = os.getenv('OPENAI_API_KEY')
 # File to store errors
 ERRORS_FILE = "errors.json"
 
-# File to store surbeys
-MISSING_SKILLS_FILE = "surveys.json"
-
 # File to store responses
 RESPONSE_FILE = "response.json"
-
-# File to store missing skills
-MISSING_SKILLS_FILE = "missing_skills.json"
 
 # Setup FastAPI
 app = FastAPI()
@@ -239,9 +232,9 @@ def assign_skills(sentences, inn_skills):
             cos_scores = util.cos_sim(sentence_embedding, embeddings_inn)[0]
             top_results = torch.topk(cos_scores, k=top_k)
 
-            #print("")
-            #print("")
-            #print("Query:", k)
+            print("")
+            print("")
+            print("Query:", k)
 
             first_skill = 0
 
@@ -259,7 +252,7 @@ def assign_skills(sentences, inn_skills):
                         gpt_skills.append([round(score.item(), 2), inn_skills[idx]])
                         first_skill = 1
 
-            #print("gpt_skills:", gpt_skills)
+            print("gpt_skills:", gpt_skills)
 
 
 
@@ -326,14 +319,14 @@ def return_skills_improved(user_input, json_validation, inn_list):
             # print"Skills:",skills)
 
             #sorted_tags = sorted(skills, key=lambda x: x[0], reverse=True)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
+            print("Sklls:", skills)
+            print("User Vector:", user_vector)
 
         else:
             inn_list = innential_skills()
             skills, user_vector = assign_skills_simple(user_input, inn_list)
-            #print("Sklls:", skills)
-            #print("User Vector:", user_vector)
+            print("Sklls:", skills)
+            print("User Vector:", user_vector)
 
     except Exception as e:
         save_error(str(e), traceback.format_exc(), "return_skills_improved")
@@ -454,10 +447,10 @@ def validate_json(text):
 def is_valid_json(json_string):
     try:
         json.loads(json_string)
-        #print("Json is valid")
+        print("Json is valid")
         return True
     except ValueError:
-        #print("Json is invalid")
+        print("Json is invalid")
         return False
 
 def chat(message):
@@ -485,6 +478,39 @@ def chat(message):
     return response['choices'][0]['message']['content'].strip(), response['usage']['completion_tokens'], \
     response['usage']['prompt_tokens']
 
+def gpt_recommend(user_input: str) -> str:
+    text = "Feedback: " + user_input + """
+            Assign up to """ + str(default_params.number_of_output_skills) + """ skills to the feedback.
+            Return response with only list of skills names and two sentance description. The list must be in JSON format examples:
+            {Skill 1: Skill Description, Skill N: Skill Description}.
+            """
+
+    start = time.time()
+    response, completion_tokens, prompt_tokens = chat(text)
+    end = time.time()
+
+    #print("GPT first: {} seconds".format(end - start))
+
+    # Try another prompt if the first one doesn't work
+    if response == "":
+        text = "Choose up to """ + str(default_params.number_of_output_skills) + """ skills to this problem """ + user_input + """
+                Return response with only list of skills names (without description) in JSON "Skill number":"skill name" format."""
+
+        response, completion_tokens, prompt_tokens = chat(text)
+
+    json_validation = is_valid_json(response)
+
+    if json_validation is True:
+        # Remove prefix from response
+        response_json = response[response.find('{'): response.find('}') + 1]
+
+    else:
+        response_json = response
+
+    #print(type(response_json))
+    #print("GPT formatted json:", response_json)
+
+    return response_json, completion_tokens, prompt_tokens, json_validation
 def gpt_feedback(user_input: str) -> str:
     text = "Feedback: " + user_input + """
             Assign up to """ + str(default_params.number_of_output_skills) + """ skills to the feedback.
@@ -571,9 +597,9 @@ def calc_price(model: str, completion_tokens: int, prompt_tokens: int):
         return 0
 
 def process_message(message):
+    # Measure total time
+    start_total = time.time()
     try:
-        # Measure total time
-        start_total = time.time()
 
         # Save input to class
         FeedbackInfo.message = message
@@ -640,16 +666,14 @@ def process_message(message):
             "Feedback": filtered_skills,
         }
 
-        end_total = time.time()
-        FeedbackInfo.total_time = end_total - start_total
-
-        # print"Total time: ", end_total - start_total)
-
     except Exception as e:
         save_error(str(e), "process_message", traceback.format_exc())
         return
 
     save_response()
+
+    end_total = time.time()
+    print("Total time feedback:", end_total - start_total)
 
     return response, user_vector
 
@@ -665,18 +689,12 @@ def recommend_feedback(message):
         innential_list = innential_skills()
 
         # Use OpenAI Chat API to generate a response
-        first_response, completion_tokens_v1, prompt_tokens, json_validation = gpt_feedback(message)
+        first_response, completion_tokens_v1, prompt_tokens, json_validation = gpt_recommend(message)
 
         if json_validation is True:
             FeedbackInfo.gpt_first_response = json.loads(validate_json(first_response))
         else:
             FeedbackInfo.gpt_first_response = first_response
-
-        # Calculate price of the request
-        price_v1 = calc_price('gpt-3', completion_tokens_v1, prompt_tokens)
-
-        # Measure time for assigning skills
-        start_skills = time.time()
 
         # Assign skills
         skill_list, user_vector = return_skills_improved(first_response, json_validation, innential_list)
@@ -685,56 +703,15 @@ def recommend_feedback(message):
         FeedbackInfo.skills = skill_list
         FeedbackInfo.user_vector = user_vector
 
-        end_skills = time.time()
-        FeedbackInfo.assign_skills_time = end_skills - start_skills
+        end = time.time()
 
-        # GPT call again
-        processed_text, completion_tokens_v2, prompt_tokens = gpt_skills(message, [skill for score, skill in skill_list], innential_list)
-
-        #print("Processed text:", processed_text)
-
-        # Remove html tags
-        processed_text = remove_html_tags(processed_text)
-
-        #print("Remove html tags:", processed_text)
-
-        processed_text = validate_json(processed_text)
-
-        #print(processed_text)
-
-        # Load response to json
-        json_text = json.loads(str(processed_text))
-
-        # Check if the skills from responses matches the skills from innential, if not then remove them
-        filtered_skills = {skill: description for skill, description in json_text.items() if
-                           skill in innential_list}
-
-        # Save response
-        FeedbackInfo.gpt_second_response = filtered_skills
-
-        price_2 = calc_price('gpt-3', completion_tokens_v2, prompt_tokens)
-
-        # Calculate total price
-        total_price = round(price_v1 + price_2, 5)
-        FeedbackInfo.total_price = total_price
-        FeedbackInfo.total_tokens = completion_tokens_v1 + completion_tokens_v2
-
-        response = {
-            "Feedback": filtered_skills,
-        }
-
-        end_total = time.time()
-        FeedbackInfo.total_time = end_total - start_total
-
-        # print"Total time: ", end_total - start_total)
+        print("total time feedback:", end - start_total)
 
     except Exception as e:
         save_error(str(e), "process_message", traceback.format_exc())
         return
 
-    save_response()
-
-    return response, user_vector
+    return first_response, user_vector
 
 
 @app.post("/process_message")
@@ -751,9 +728,9 @@ def feedback_recommendation_api(message: Message):
     # Generate user ID
     FeedbackInfo.user_id = generate_user_id()
 
-    response, user_vector = process_message(message.message)
+    response, user_vector = recommend_feedback(message.message)
 
-    recommendation = recommendation_engine(user_vector, str(response['Feedback']), message.message)
+    recommendation = recommendation_engine(user_vector, response, message.message)
 
     end = time.time()
 
@@ -763,9 +740,22 @@ def feedback_recommendation_api(message: Message):
 
     return response, recommendation
 
-# Receive survey json
+@app.post("/chat_recommendation")
+def chat_recommendation(message: Message):
+    additional_skill = assign_skills_simple(message.message, innential_skills())
+    user_vector = Candidate.user_vector
 
-# Endpoint for survey json
+    print("Additional skill:", additional_skill)
+
+    # Check if additional skill exists and append it to user_vector
+    if additional_skill[0][0]:
+        if additional_skill[0][0] not in user_vector:
+            user_vector.append(additional_skill[0][0])
+
+    top_n_candidates = generate_candidates(user_vector, Candidate.user_feedback, Candidate.user_input, n_candidates=100)
+    response = selection(top_n_candidates, message.message, weight=1)
+    return response
+
 
 @app.get('/healthcheck')
 def healthcheck():

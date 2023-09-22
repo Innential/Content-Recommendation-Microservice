@@ -7,3 +7,4 @@ app/missing_skills.json
 /.ssl
 /certbot
 !/FastAPI/test_sentence.py
+/app/Test_files/
