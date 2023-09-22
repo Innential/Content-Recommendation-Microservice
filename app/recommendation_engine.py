@@ -1,20 +1,17 @@
-import os
 import json
+import os
 import re
-import time
+
 import numpy as np
-import requests
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer, util
 from sklearn.metrics.pairwise import cosine_similarity
-from config import Innential
 
-# TODO
-# Load innential base once in a while
-# Stages in separate function in separate file pipieline.py
+from config import Innential
 
 # Sentence model tranformer
 sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+
 
 class Candidate(BaseModel):
     candidates: list
@@ -23,27 +20,6 @@ class Candidate(BaseModel):
     user_input: str
     user_feedback: str
 
-def innential_API():
-    """
-        Retrieves skills categories from the Innential API.
-        Returns:
-            A list of subskills gathered from the API.
-        Raises:
-            Exception: If the API request fails to retrieve data.
-    """
-
-    skills = requests.get("https://api.innential.com/scraper/skills-categories/public")
-
-    if skills.status_code == 200:
-        json_data = skills.json()
-    else:
-        raise Exception("Failed to retrieve data from API")
-
-    # Iterate over json dict and gather all skills
-    subskills = [list(subcategory_dict.keys())[0] for subcategory_list in json_data.values() for subcategory_dict in
-                 subcategory_list]
-
-    return subskills
 
 def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, weight=1.5):
     """
@@ -89,10 +65,12 @@ def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, wei
 
     return list_of_candidates[:top_n]
 
+
 def read_json_files():
     data_list = []
 
-    file_paths = ['Data/coursera_dry.json', 'Data/datacamp_dry.json', 'Data/pluralsight_prod.json', 'Data/udemy_prod.json', 'Data/udemy_prod_2.json']
+    file_paths = ['Data/coursera_dry.json', 'Data/datacamp_dry.json', 'Data/pluralsight_prod.json',
+                  'Data/udemy_prod.json', 'Data/udemy_prod_2.json']
 
     absolute_file_paths = [os.path.abspath(path) for path in file_paths]
 
@@ -103,6 +81,7 @@ def read_json_files():
             data_list.extend(data)
 
     return data_list
+
 
 def find_skills(user_input, skills):
     """
@@ -121,6 +100,7 @@ def find_skills(user_input, skills):
         if pattern.search(user_input):
             found_skills.append(skill)
     return found_skills
+
 
 def test_information():
     user_vector = [
@@ -157,6 +137,7 @@ def test_information():
 
     return user_vector, user_input
 
+
 def generate_candidates(user_preferences, user_feedback, user_input, n_candidates=100):
     """
     Generates candidates based on user preferences, user feedback, and user input.
@@ -191,25 +172,20 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
             # Append the new skill with weight 1
             user_preferences.append((1, skill))
 
-    # sort the user preferences based on the cosine similarity
+    # Sort the user preferences based on the cosine similarity
     user_preferences = sorted(user_preferences, key=lambda x: x[0], reverse=True)
+
+    # Take only the top 8 skills
     user_preferences = user_preferences[:8]
 
     print("User vector: ", user_preferences)
     print("User feedback: ", user_feedback)
 
-    # print("Innential skills:", innential_skills)
-
-    start = time.time()
-
-    # user_vector = np.array([skill[0] if skill[1] in user_preferences else 0 for skill in innential_skills])
-
     # Create empty vector
     user_vector = np.zeros(len(innential_skills))
 
-    # Max value
+    # Max value for normalization
     max_weight = max(pref[0] for pref in user_preferences)
-    # print("Max weight: ", max_weight)
 
     # Cutoff
     cutoff = 0
@@ -226,14 +202,12 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
 
     print("User vector: ", user_vector)
 
-    path = "Data/courses_data.json"
-
+    # Read courses data from json
     data = read_json_files()
 
     # Remove duplicates from the initial list of courses
     unique_data = []
     seen_titles = set()
-
     for course in data:
         title = course["course_title"]
         if title not in seen_titles:
@@ -245,7 +219,6 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
     print("")
     print("Candidates")
     for course in unique_data:
-
         # Create a dictionary to store skill weights for the course
         skill_weights = course["analysis_results"]
 
@@ -261,17 +234,29 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
     # Sort the courses based on cosine similarity in descending order
     cosine_similarities.sort(key=lambda x: x[1], reverse=True)
 
-    # Get the top 20 candidates with their respective titles
+    # Get the top N candidates with their respective titles
     top_n_candidates = cosine_similarities[:n_candidates]
 
-    # Save the top N candidates with their respective titles
+    # Save the top N candidates to Innential Class
     Candidate.candidates = top_n_candidates
 
     return top_n_candidates
 
 
-def selection(top_n_candidates, user_input, weight):
-    # Print the top 20 candidates with their respective titles
+def selection(top_n_candidates, user_input, weight, n_candidates=10):
+    """
+        From the previously generated candidates, select the top 10 based on the SBERT filtering using feedback from GPT
+
+        Parameters:
+        - top_n_candidates (list): A list of candidates to be printed and filtered.
+        - user_input (str): The user input used for filtering.
+        - weight (float): The weight used for filtering.
+
+        Returns:
+        - filtering (list): The filtered list of candidates.
+        """
+
+    # Print the top N candidates with their respective titles
     for i, (course, cosine_sim) in enumerate(top_n_candidates):
         print(f"{i + 1}. {course['course_title']} - Cos: {round(cosine_sim, 2)} - {course['analysis_results']}")
 
@@ -279,12 +264,8 @@ def selection(top_n_candidates, user_input, weight):
     print("Sbert filtering:")
 
     # Filtering based on SBERT
-    start_sbert = time.time()
-    filtering = filter_courses_sbert(user_input, top_n_candidates, sentence_model, 10, 0.1, weight)
+    filtering = filter_courses_sbert(user_input, top_n_candidates, sentence_model, n_candidates, 0.1, weight)
     Candidate.selection = filtering  # Save the filtered courses
-    end_sbert = time.time()
-
-    print(f"Total time taken: {end_sbert - start_sbert} seconds")
 
     for i, course in enumerate(filtering):
         print(
@@ -294,9 +275,22 @@ def selection(top_n_candidates, user_input, weight):
 
 
 def recommendation_engine(user_preferences, user_feedback, user_input):
+    """
+       Generates recommendations based on user preferences, feedback, and input.
+       Parameters:
+           user_preferences (list): A list of user preferences.
+           user_feedback (dict): A dictionary containing user feedback.
+           user_input (str): The user input.
+       Returns:
+           tuple: A tuple containing the filtered recommendations and the top N candidates.
+       """
+    # Store user_input and user feedback for narrowing feature
     Candidate.user_input = user_input
     Candidate.user_feedback = user_feedback
+
+    # Generate candidates
     top_n_candidates = generate_candidates(user_preferences, user_feedback, user_input, n_candidates=100)
-    filtering = selection(top_n_candidates, user_input, weight=1.5)
+    # Select the top N
+    filtering = selection(top_n_candidates, user_input, weight=1.5, n_candidates=10)
 
     return filtering, top_n_candidates
