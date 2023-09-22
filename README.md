@@ -25,6 +25,7 @@ REM consist of three main stages:
 3. Re-Ranking - Based on the equation `Candidates Score x Weight + Scoring * Weight` the list will be re-ranked
 
 # Usage
+<img src="https://github.com/Innential/Content-Recommendation-Microservice/blob/main/app/Data/usage.jpg" width="600"/>
 Application provides two Endpoints:
 - `/feedback_recommendation` - This API endpoint is designed to provide course recommendations based on user feedback and preferences. It generates recommendations and returns them along with additional information.
 - `/chat_recommendation` - This API is designed to have a chat with user. Once the general question was asked to `/feedback_recommendation`, we can narrow down the results.
