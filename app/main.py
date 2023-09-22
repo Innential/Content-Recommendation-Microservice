@@ -1,18 +1,21 @@
-from recommendation_engine import recommendation_engine, Candidate, selection, generate_candidates
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from dotenv import load_dotenv
-import openai
 import json
-import time
-import uuid
 import os
-import requests
-from sentence_transformers import SentenceTransformer, util
-import numpy as np
-import traceback
-import torch
 import re
+import time
+import traceback
+import uuid
+import numpy as np
+import openai
+import requests
+import torch
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi_utils.tasks import repeat_every
+from pydantic import BaseModel
+from sentence_transformers import SentenceTransformer, util
+from recommendation_engine import recommendation_engine, Candidate, selection, generate_candidates
+from config import innential_skills, Innential
 
 # http://127.0.0.1:8000/docs#/ interactive API documentation
 # http://127.0.0.1:8000/redoc  ReDoc interactive API documentation
@@ -32,6 +35,10 @@ RESPONSE_FILE = "response.json"
 
 # Setup FastAPI
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    await innential_skills()
 
 # Default parameters class
 class DefaultParams:
@@ -323,7 +330,7 @@ def return_skills_improved(user_input, json_validation, inn_list):
             print("User Vector:", user_vector)
 
         else:
-            inn_list = innential_skills()
+            inn_list = Innential.skills
             skills, user_vector = assign_skills_simple(user_input, inn_list)
             print("Sklls:", skills)
             print("User Vector:", user_vector)
@@ -340,7 +347,7 @@ def return_skills_improved(user_input, json_validation, inn_list):
 
 # Return skills for the uer input
 def return_skills(user_input):
-    skills_list = innential_skills()
+    skills_list = Innential.skills
 
     response_dict = json.loads(user_input[user_input.find('{'):])
     try:
@@ -399,28 +406,6 @@ def return_skills(user_input):
         tag[0] = round(tag[0], 2)
 
     return sorted_tags
-
-# Get innential skills from API
-def innential_skills():
-    try:
-        skills = requests.get("https://api.innential.com/scraper/skills-categories/public")
-        skills.raise_for_status()
-        json_data = skills.json()
-        # print"Innential Skills API: successful")
-
-    except requests.exceptions.RequestException as e:
-        save_error(str(e), "innential_skills", traceback.format_exc())
-        raise HTTPException(status_code=500, detail="An error occurred and has been saved.")
-        return []
-
-    except ValueError as e:
-        save_error(str(e), "innential_skills", traceback.format_exc())
-        return []
-
-    subcategories = [list(subcategory_dict.keys())[0] for subcategory_list in json_data.values() for subcategory_dict in
-                     subcategory_list]
-
-    return subcategories
 
 def validate_json(text):
     try:
@@ -605,7 +590,7 @@ def process_message(message):
         FeedbackInfo.message = message
 
         # Get innential skills
-        innential_list = innential_skills()
+        innential_list = Innential.skills
 
         # Use OpenAI Chat API to generate a response
         first_response, completion_tokens_v1, prompt_tokens, json_validation = gpt_feedback(message)
@@ -686,7 +671,7 @@ def recommend_feedback(message):
         FeedbackInfo.message = message
 
         # Get innential skills
-        innential_list = innential_skills()
+        innential_list = Innential.skills
 
         # Use OpenAI Chat API to generate a response
         first_response, completion_tokens_v1, prompt_tokens, json_validation = gpt_recommend(message)
@@ -742,7 +727,7 @@ def feedback_recommendation_api(message: Message):
 
 @app.post("/chat_recommendation")
 def chat_recommendation(message: Message):
-    additional_skill = assign_skills_simple(message.message, innential_skills())
+    additional_skill = assign_skills_simple(message.message, Innential.skills)
     user_vector = Candidate.user_vector
 
     print("Additional skill:", additional_skill)
@@ -755,7 +740,6 @@ def chat_recommendation(message: Message):
     top_n_candidates = generate_candidates(user_vector, Candidate.user_feedback, Candidate.user_input, n_candidates=100)
     response = selection(top_n_candidates, message.message, weight=1)
     return response
-
 
 @app.get('/healthcheck')
 def healthcheck():

@@ -1,20 +1,20 @@
+import os
 import json
-import requests
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-import time
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline
-import requests
-from sentence_transformers import SentenceTransformer, util
 import re
+import time
+import numpy as np
+import requests
 from pydantic import BaseModel
-
-# Sentence model tranformer
-sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
+from sentence_transformers import SentenceTransformer, util
+from sklearn.metrics.pairwise import cosine_similarity
+from config import Innential
 
 # TODO
 # Load innential base once in a while
 # Stages in separate function in separate file pipieline.py
+
+# Sentence model tranformer
+sentence_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 class Candidate(BaseModel):
     candidates: list
@@ -24,30 +24,43 @@ class Candidate(BaseModel):
     user_feedback: str
 
 def innential_API():
-    # Connect to API and gather all skills to list
+    """
+        Retrieves skills categories from the Innential API.
+        Returns:
+            A list of subskills gathered from the API.
+        Raises:
+            Exception: If the API request fails to retrieve data.
+    """
+
     skills = requests.get("https://api.innential.com/scraper/skills-categories/public")
 
-    # Check API call status and raise exception if it was other than 200
     if skills.status_code == 200:
         json_data = skills.json()
-
     else:
         raise Exception("Failed to retrieve data from API")
 
     # Iterate over json dict and gather all skills
-    subskills = [list(subcategory_dict.keys())[0] for subcategory_list in json_data.values() for subcategory_dict in subcategory_list]
+    subskills = [list(subcategory_dict.keys())[0] for subcategory_list in json_data.values() for subcategory_dict in
+                 subcategory_list]
 
     return subskills
 
-def read_json(path):
-    with open(path) as f:
-        return json.load(f)
-
 def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, weight=1.5):
-    # FIltering based on SBERT
+    """
+        Filters a list of courses using SBERT embeddings and cosine similarity.
+        Args:
+            feedback (str): The text feedback to compare against the courses.
+            list_of_candidates (List[Tuple[str, float]]): A list of tuples containing the courses and their initial scores.
+            model (SBERTModel): The SBERT model used for encoding the text and courses.
+            top_n (int): The maximum number of courses to return.
+            cutoff (float): The minimum cosine similarity score required for a course to be considered.
+            weight (float, optional): The weight to apply to the score from `assigned_skills`. Defaults to 1.5.
+        Returns:
+            List[Tuple[str, float]]: A list of tuples containing the top `top_n` courses and their scores.
+        """
 
-    #print("Course: ", course)
-    course = [course for course,_ in list_of_candidates]
+    course = [course for course, _ in list_of_candidates]
+
     # Encode the text
     embeddings_text = model.encode(feedback)
     embeddings_cat = model.encode(course)
@@ -58,14 +71,8 @@ def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, wei
     # Add all pairs to a list with their cosine similarity score
     keys = [[cos_sim[i][0], i, 0] for i in range(len(cos_sim))]
 
-    # Sort list by the highest cosine similarity score
-    #keys = sorted(keys, key=lambda x: x[0], reverse=True)
-
-    #print(keys)
-
+    # Apply cutoff
     assigned_skills = [[course[i], score] for score, i, j in keys if score > cutoff]
-
-    #print(assigned_skills)
 
     list_of_candidates = [list(item) for item in list_of_candidates]
 
@@ -73,90 +80,97 @@ def filter_courses_sbert(feedback, list_of_candidates, model, top_n, cutoff, wei
     for i in range(len(list_of_candidates)):
         for j in range(len(assigned_skills)):
             if list_of_candidates[i][0] == assigned_skills[j][0]:
-                list_of_candidates[i][1] += assigned_skills[j][1]*weight
+                # Add score with the assigned weight
+                list_of_candidates[i][1] += assigned_skills[j][1] * weight
                 break
 
-    # Sort list_of_candidates by the updated score
+    # Sort list_of_candidates by the updated new score
     list_of_candidates.sort(key=lambda x: x[1], reverse=True)
-
 
     return list_of_candidates[:top_n]
 
 def read_json_files():
-    # List to store data from JSON files
     data_list = []
 
-    # List of file paths to your JSON files
     file_paths = ['Data/coursera_dry.json', 'Data/datacamp_dry.json', 'Data/pluralsight_prod.json', 'Data/udemy_prod.json', 'Data/udemy_prod_2.json']
 
+    absolute_file_paths = [os.path.abspath(path) for path in file_paths]
+
     # Loop through each file and read its data
-    for file_path in file_paths:
+    for file_path in absolute_file_paths:
         with open(file_path, 'r') as json_file:
             data = json.load(json_file)
-            data_list.extend(data)  # Append data from the file to the list
+            data_list.extend(data)
 
     return data_list
 
-def normalize(data):
-    '''
-    This function will normalize the input data to be between 0 and 1
+def find_skills(user_input, skills):
+    """
+    Find innential skills using REGEX in the given user input.
+    Parameters:
+        feedback (str): The user feedback to search for skills.
+        skills (list): A list of skills to search for in the feedback.
+    Returns:
+        list: A list of skills found in the feedback.
+    """
 
-    params:
-        data (List) : The list of values you want to normalize
-
-    returns:
-        The input data normalized between 0 and 1
-    '''
-    min_val = min(data)
-    if min_val < 0:
-        data = [x + abs(min_val) for x in data]
-    max_val = max(data)
-    return [x / max_val for x in data]
-
-def find_skills(feedback, skills):
-    # Define a function to check for skills in the user feedback
     found_skills = []
     for skill in skills:
         # Create a regex pattern for the skill (case-insensitive)
         pattern = re.compile(r'\b' + re.escape(skill) + r'\b', re.IGNORECASE)
-        if pattern.search(feedback):
+        if pattern.search(user_input):
             found_skills.append(skill)
     return found_skills
 
-user_preferences =  [
-      [
-        0.75,
-        "Product Roadmapping"
-      ],
-      [
-        0.64,
-        "Product Development"
-      ],
-      [
-        0.63,
-        "Product Management"
-      ],
-      [
-        0.6,
-        "Product Lifecycle Management"
-      ],
-      [
-        0.66,
-        "Communicating Effectively in a Team"
-      ],
-      [
-        0.48,
-        "Teamwork"
-      ],
-      [
-        0.48,
-        "Giving Clear Feedback"
-      ]
+def test_information():
+    user_vector = [
+        [
+            0.75,
+            "Product Roadmapping"
+        ],
+        [
+            0.64,
+            "Product Development"
+        ],
+        [
+            0.63,
+            "Product Management"
+        ],
+        [
+            0.6,
+            "Product Lifecycle Management"
+        ],
+        [
+            0.66,
+            "Communicating Effectively in a Team"
+        ],
+        [
+            0.48,
+            "Teamwork"
+        ],
+        [
+            0.48,
+            "Giving Clear Feedback"
+        ]
     ]
-user_feedback = "My team members told me that I need to become a better product manager and work on roadmapping"
+    user_input = "My team members told me that I need to become a better product manager and work on roadmapping"
+
+    return user_vector, user_input
 
 def generate_candidates(user_preferences, user_feedback, user_input, n_candidates=100):
-    innential_skills = innential_API()
+    """
+    Generates candidates based on user preferences, user feedback, and user input.
+    Parameters:
+    - user_preferences: A list of tuples representing the user's preferences. Each tuple contains a weight and a skill.
+    - user_feedback: A string representing the user's feedback.
+    - user_input: A string representing the user's input.
+    - n_candidates: An optional integer representing the number of candidates to generate. Default is 100.
+    Returns:
+    - top_n_candidates: A list of tuples representing the top N candidates. Each tuple contains a course and its cosine similarity score.
+    """
+
+    # Load innential skills
+    innential_skills = Innential.skills
 
     print(user_preferences)
 
@@ -217,7 +231,6 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
     data = read_json_files()
 
     # Remove duplicates from the initial list of courses
-    # Remove duplicates from the initial list of courses
     unique_data = []
     seen_titles = set()
 
@@ -227,21 +240,14 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
             seen_titles.add(title)
             unique_data.append(course)
 
-    iteration_limit = 8800
     cosine_similarities = []
 
     print("")
     print("Candidates")
-    for i, course in enumerate(unique_data):
-        if i >= iteration_limit:
-            break
-
-        # print(course)
+    for course in unique_data:
 
         # Create a dictionary to store skill weights for the course
         skill_weights = course["analysis_results"]
-
-        # print("skills: ", skill_weights)
 
         # Vector for the course based on all_skills with corresponding weights
         course_vector = np.array([skill_weights[skill] if skill in skill_weights else 0 for skill in innential_skills])
@@ -262,6 +268,7 @@ def generate_candidates(user_preferences, user_feedback, user_input, n_candidate
     Candidate.candidates = top_n_candidates
 
     return top_n_candidates
+
 
 def selection(top_n_candidates, user_input, weight):
     # Print the top 20 candidates with their respective titles
@@ -284,6 +291,7 @@ def selection(top_n_candidates, user_input, weight):
             f"{i + 1}. {course[0]['course_title']} - {course[1]} - {course[0]['analysis_results']} - {course[0]['source_url']}")
 
     return filtering
+
 
 def recommendation_engine(user_preferences, user_feedback, user_input):
     Candidate.user_input = user_input
